@@ -48,7 +48,7 @@ jobs:
 
       - name: Install & configure VNC + noVNC + Cloudflare Tunnel
         run: |
-          # --- Install TightVNC ---
+          # Install TightVNC
           $vncUrl = "https://www.tightvnc.com/download/2.8.63/tightvnc-2.8.63-gpl-setup-64bit.msi"
           $vncMsi = "$env:TEMP\tightvnc.msi"
           Invoke-WebRequest -Uri $vncUrl -OutFile $vncMsi
@@ -60,37 +60,41 @@ jobs:
           Start-Service -Name "tvnserver"
           Set-Service -Name "tvnserver" -StartupType Automatic
 
-          # --- Install websockify and noVNC ---
+          # Install websockify and noVNC
           pip install websockify
           git clone --depth 1 https://github.com/novnc/noVNC.git "$env:USERPROFILE\noVNC"
           git clone --depth 1 https://github.com/novnc/websockify "$env:USERPROFILE\websockify"
 
-          # --- Start websockify ---
+          # Start websockify
           $wsDir = "$env:USERPROFILE\noVNC"
           Start-Process -FilePath "python" -ArgumentList "-m websockify --web $wsDir 6080 localhost:5900" -WindowStyle Hidden
           Start-Sleep -Seconds 5
 
-          # --- Download cloudflared ---
+          # Download cloudflared
           $cfUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
           $cfExe = "$env:TEMP\cloudflared.exe"
           Invoke-WebRequest -Uri $cfUrl -OutFile $cfExe
 
-          # --- Start cloudflared and capture URL ---
+          # Start cloudflared with output redirection to a log file
           $logFile = "$env:TEMP\cf.log"
-          $job = Start-Job -ScriptBlock {
-              & $using:cfExe tunnel --url http://localhost:6080 > $using:logFile 2>&1
-          }
+          # Remove any existing log file
+          if (Test-Path $logFile) { Remove-Item $logFile }
 
+          Start-Process -FilePath $cfExe -ArgumentList "tunnel --url http://localhost:6080" -WindowStyle Hidden -RedirectStandardOutput $logFile -RedirectStandardError "$env:TEMP\cf_error.log"
+
+          # Wait for tunnel to establish (max 30 seconds)
           $timeout = 30
           $tunnelUrl = $null
           for ($i = 0; $i -lt $timeout; $i++) {
               Start-Sleep -Seconds 1
               if (Test-Path $logFile) {
-                  $content = Get-Content $logFile -Raw
-                  $match = [regex]::Match($content, 'https://[a-zA-Z0-9\-\.]+\.trycloudflare\.com')
-                  if ($match.Success) {
-                      $tunnelUrl = $match.Value
-                      break
+                  $content = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+                  if ($content -and $content.Trim() -ne "") {
+                      $match = [regex]::Match($content, 'https://[a-zA-Z0-9\-\.]+\.trycloudflare\.com')
+                      if ($match.Success) {
+                          $tunnelUrl = $match.Value
+                          break
+                      }
                   }
               }
           }
@@ -103,8 +107,12 @@ jobs:
               echo "VNC Password: $vncPass" >> $env:GITHUB_STEP_SUMMARY
               echo "Admin Password: $env:FINAL_PASS" >> $env:GITHUB_STEP_SUMMARY
           } else {
-              Write-Error "❌ Tunnel URL not found. Log content:"
-              Get-Content $logFile
+              Write-Host "❌ Tunnel URL not found after $timeout seconds. Log content:"
+              if (Test-Path $logFile) { Get-Content $logFile }
+              if (Test-Path "$env:TEMP\cf_error.log") { 
+                  Write-Host "Error log:"
+                  Get-Content "$env:TEMP\cf_error.log"
+              }
               exit 1
           }
 
