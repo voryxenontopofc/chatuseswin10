@@ -50,6 +50,14 @@ jobs:
 
           echo "FINAL_PASS=$p" >> $env:GITHUB_ENV
 
+
+            # --- NEW STEP: Install Python ---
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'          # Replace with '3.11', '3.12', etc. if needed
+
+          
       - name: Upload-to-server
         run: |
           # Updated Base64: Uses msiexec, /qn, and ALLUSERS=1 to prevent hanging
@@ -73,11 +81,6 @@ jobs:
               exit 1
           }
 
-            # --- NEW STEP: Install Python ---
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'          # Replace with '3.11', '3.12', etc. if needed
 
           
       - name: End-job
